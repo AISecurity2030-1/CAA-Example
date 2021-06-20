@@ -135,6 +135,7 @@ if args.dataset == 'cifar10':
         model.load_state_dict({k[13:]:v for k,v in torch.load('D:\Software\Programme\python程序\pytorch程序\CAA-main\CAA-main\checkpoints\cifar_linf_8.pt')['state_dict'].items() if 'attacker' not in k and 'new' not in k})
         normalize = NormalizeByChannelMeanStd(
             mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
+            
         #可以通过nn.Sequential(normalize, model)将图像规范化添加到现有的pytorch模型中，这样就不必再对输入图像进行规范化了。
         model = nn.Sequential(normalize, model)
     
