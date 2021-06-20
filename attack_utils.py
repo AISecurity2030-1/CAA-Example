@@ -27,7 +27,7 @@ class NormalizeByChannelMeanStd(nn.Module):
 
     def forward(self, tensor):
         return normalize_fn(tensor, self.mean, self.std)
-
+    
     def extra_repr(self):
         return 'mean={}, std={}'.format(self.mean, self.std)
 
@@ -50,7 +50,7 @@ def get_diff_logits_grads_batch(model, imgs, la):
     df = y2 - y2[torch.arange(imgs.shape[0]), la].unsqueeze(1)
     dg = g2 - g2[torch.arange(imgs.shape[0]), la].unsqueeze(1)
     df[torch.arange(imgs.shape[0]), la] = 1e10
-
+    
     return df, dg
 
 def check_shape(x):
@@ -70,40 +70,41 @@ def projection_linf(points_to_project, w_hyperplane, b_hyperplane):
     ind2 = check_shape(ind2)
     w[ind2] *= -1
     b[ind2] *= -1
-
+    
     c5 = (w < 0).float()
     a = torch.ones(t.shape).to(device)
     d = (a * c5 - t) * (w != 0).float()
     a -= a * (1 - c5)
-
+    
     p = torch.ones(t.shape).to(device) * c5 - t * (2 * c5 - 1)
     _, indp = torch.sort(p, dim=1)
-
+    
     b = b - (w * t).sum(1)
     b0 = (w * d).sum(1)
     b1 = b0.clone()
-
+    
     counter = 0
+    
     indp2 = torch.flip(indp.unsqueeze(-1), dims=(1, 2)).squeeze()
     u = torch.arange(0, w.shape[0])
     ws = w[u.unsqueeze(1), indp2]
     bs2 = - ws * d[u.unsqueeze(1), indp2]
-
+    
     s = torch.cumsum(ws.abs(), dim=1)
     sb = torch.cumsum(bs2, dim=1) + b0.unsqueeze(1)
-
+    
     c = b - b1 > 0
     b2 = sb[u, -1] - s[u, -1] * p[u, indp[u, 0]]
     c_l = (b - b2 > 0).nonzero().squeeze()
     c2 = ((b - b1 > 0) * (b - b2 <= 0)).nonzero().squeeze()
     c_l = check_shape(c_l)
     c2 = check_shape(c2)
-
+    
     lb = torch.zeros(c2.shape[0])
     ub = torch.ones(c2.shape[0]) * (w.shape[1] - 1)
     nitermax = torch.ceil(torch.log2(torch.tensor(w.shape[1]).float()))
     counter2 = torch.zeros(lb.shape).long()
-
+    
     while counter < nitermax:
         counter4 = torch.floor((lb + ub) / 2)
         counter2 = counter4.long()
@@ -117,20 +118,20 @@ def projection_linf(points_to_project, w_hyperplane, b_hyperplane):
         lb[ind3] = counter4[ind3]
         ub[ind32] = counter4[ind32]
         counter += 1
-
+    
     lb = lb.long()
     counter2 = 0
-
+    
     if c_l.nelement() != 0:
         lmbd_opt = (torch.max((b[c_l] - sb[c_l, -1]) / (-s[c_l, -1]),
                                 torch.zeros(sb[c_l, -1].shape)
                                 .to(device))).unsqueeze(-1)
         d[c_l] = (2 * a[c_l] - 1) * lmbd_opt
-
+    
     lmbd_opt = (torch.max((b[c2] - sb[c2, lb]) / (-s[c2, lb]),
                             torch.zeros(sb[c2, lb].shape)
                             .to(device))).unsqueeze(-1)
     d[c2] = torch.min(lmbd_opt, d[c2]) * c5[c2]\
         + torch.max(-lmbd_opt, d[c2]) * (1 - c5[c2])
-
+    
     return d * (w != 0).float()

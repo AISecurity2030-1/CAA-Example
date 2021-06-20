@@ -32,20 +32,21 @@ def CommonCorruptionsAttack(x, y, model, magnitude, name):
     if torch.sum((pred==y)).item() == 0:#求出预测的值与真实标签值相同的个数
         return adv, None
     ind_non_suc = (pred==y).nonzero().squeeze()#返回预测与真实标签相同的下标，例如pred=torch.tensor([1,2])，y=torch.tensor([1,2]).则返回tensor([0, 1])
+    
     x = x[ind_non_suc]#得到预测一致的原图像
     y = y[ind_non_suc]
     x = x if len(x.shape) == 4 else x.unsqueeze(0)#将原图像扩充为四维
     y = y if len(y.shape) == 1 else y.unsqueeze(0)
-
+    
     x_np = x.permute((0,2,3,1)).cpu().numpy()  # We make a copy to avoid changing things in-place，维度换位
     x_np = (x_np * 255).astype(np.uint8)[:,:,::-1]
-
+    
     for batch_idx, x_np_b in enumerate(x_np):
         corrupt_x = corrupt(x_np_b, corruption_name=name, severity=int(magnitude))
         corrupt_x = corrupt_x.astype(np.float32) / 255.
-
+    
         adv[ind_non_suc[batch_idx]] = torch.from_numpy(corrupt_x).permute((2,0,1)).cuda()
-
+    
     return adv, None
 
 def GaussianNoiseAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='l2', gpu_idx=None):
@@ -114,10 +115,10 @@ def SPSAAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target
     x = x if len(x.shape) == 4 else x.unsqueeze(0)
     y = y if len(y.shape) == 1 else y.unsqueeze(0)
     advimg = adversary.perturb(x, y)
-
+    
     adv[ind_non_suc] = advimg
     # adv = advimg
-
+    
     return adv, None
 
 def Skip(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='l2', gpu_idx=None):
@@ -148,15 +149,15 @@ def DDNL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targe
     data_dims = (1,) * (x.dim() - 1)
     norm = torch.full((batch_size,), 1, dtype=torch.float).to(device)
     worst_norm = torch.max(x - 0, 1 - x).flatten(1).norm(p=2, dim=1)
-
+    
     delta = torch.zeros_like(x, requires_grad=True)
     optimizer = torch.optim.SGD([delta], lr=1)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=max_iters, eta_min=0.01)
-
+    
     best_l2 = worst_norm.clone()
     best_delta = torch.zeros_like(x)
-
+    
     for i in range(max_iters):
         l2 = delta.data.flatten(1).norm(p=2, dim=1)
         logits = model(x + delta)
@@ -166,17 +167,17 @@ def DDNL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targe
             loss = F.cross_entropy(logits, target)
         else:
             loss = -F.cross_entropy(logits, y)
-
+    
         is_adv = (pred_labels == target) if target is not None else (
             pred_labels != y)
         is_smaller = l2 < best_l2
         is_both = is_adv * is_smaller
         best_l2[is_both] = l2[is_both]
         best_delta[is_both] = delta.data[is_both]
-
+    
         optimizer.zero_grad()
         loss.backward()
-
+    
         # renorming gradient
         grad_norms = delta.grad.flatten(1).norm(p=2, dim=1)
         delta.grad.div_(grad_norms.view(-1, *data_dims))
@@ -184,22 +185,22 @@ def DDNL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targe
         if (grad_norms == 0).any():
             delta.grad[grad_norms == 0] = torch.randn_like(
                 delta.grad[grad_norms == 0])
-
+    
         optimizer.step()
         scheduler.step()
-
+    
         norm.mul_(1 - (2 * is_adv.float() - 1) * 0.05)
-
+    
         delta.data.mul_((norm / delta.data.flatten(1).norm(
             p=2, dim=1)).view(-1, *data_dims))
-
+    
         delta.data.add_(x)
         delta.data.mul_(255).round_().div_(255)
         delta.data.clamp_(0, 1).sub_(x)
         # print(best_l2)
-
+    
     adv_imgs = x + best_delta
-
+    
     dist = (adv_imgs - x)
     dist = dist.view(x.shape[0], -1)
     dist_norm = torch.norm(dist, dim=1, keepdim=True)
@@ -208,7 +209,7 @@ def DDNL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targe
     dist *= max_eps
     dist = dist.view(x.shape)
     adv_imgs = (x + dist) * mask.float() + adv_imgs * (1 - mask.float())
-
+    
     if previous_p is not None:
         original_image = x - previous_p
         global_dist = adv_imgs - original_image
@@ -226,7 +227,7 @@ def DDNL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targe
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def CWL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, kappa=20, _type='linf', gpu_idx=None):
@@ -250,24 +251,24 @@ def CWL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     delta = torch.zeros_like(x).to(device)
     delta.detach_()
     delta.requires_grad = True
-
+    
     optimizer = torch.optim.Adam([delta], lr=0.01)
     prev = 1e10
-
+    
     for step in range(max_iters):
-
+    
         loss1 = nn.MSELoss(reduction='sum')(delta, torch.zeros_like(x).to(device))
-
+    
         outputs = model(x+delta)
         one_hot_labels = torch.eye(len(outputs[0]))[y].to(device)
-
+    
         i, _ = torch.max((1-one_hot_labels)*outputs, dim=1)
         j = torch.masked_select(outputs, one_hot_labels.bool())
-
+    
         if target is not None:
             one_hot_target_labels = torch.eye(len(outputs[0]))[target].to(device)
             i, _ = torch.max((1-one_hot_target_labels)*outputs, dim=1)
@@ -275,17 +276,17 @@ def CWL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target
             loss2 = torch.sum(torch.clamp(i-j, min=-kappa))
         else:
             loss2 = torch.sum(torch.clamp(j-i, min=-kappa))
-
+    
         cost = 2*loss1 + loss2
-
+    
         optimizer.zero_grad()
         cost.backward()
         optimizer.step()
-
+    
         # print(delta.view(x.size(0), -1).norm(p=2,dim=1))
     adv_imgs = x + delta
     adv_imgs = torch.clamp(adv_imgs, 0, 1)
-
+    
     dist = (adv_imgs - x)
     dist = dist.view(x.shape[0], -1)
     dist_norm = torch.norm(dist, dim=1, keepdim=True)
@@ -294,7 +295,7 @@ def CWL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target
     dist *= magnitude
     dist = dist.view(x.shape)
     adv_imgs = (x + dist) * mask.float() + adv_imgs * (1 - mask.float())
-
+    
     if previous_p is not None:
         original_image = x - previous_p
         global_dist = adv_imgs - original_image
@@ -305,13 +306,13 @@ def CWL2Attack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target
         global_dist *= max_eps
         global_dist = global_dist.view(x.shape)
         adv_imgs = (original_image + global_dist) * mask.float() + adv_imgs * (1 - mask.float())
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def CWLinfAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
@@ -336,10 +337,10 @@ def CWLinfAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targ
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     one_hot_y = torch.zeros(y.size(0), 10).to(device)
     one_hot_y[torch.arange(y.size(0)), y] = 1
-
+    
     # random_start
     x.requires_grad = True 
     if isinstance(magnitude, Variable):
@@ -352,22 +353,22 @@ def CWLinfAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targ
         rand_perturb = rand_perturb.to(device)
     adv_imgs = x + rand_perturb
     adv_imgs.clamp_(0, 1)
-
+    
     if previous_p is not None:
         max_x = x - previous_p + max_eps
         min_x = x - previous_p - max_eps
     else:
         max_x = x + max_eps
         min_x = x - max_eps
-
+    
     # max_iters = int(round(magnitude/0.00784) + 2)
     max_iters = int(max_iters)
-
+    
     with torch.enable_grad():
         for _iter in range(max_iters):
             
             outputs = model(adv_imgs)
-
+    
             correct_logit = torch.sum(one_hot_y * outputs, dim=1)
             if target is not None:
                 wrong_logit = torch.zeros(target.size(0), 10).to(device)
@@ -375,37 +376,37 @@ def CWLinfAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, targ
                 wrong_logit = torch.sum(wrong_logit * outputs, dim=1)
             else:
                 wrong_logit,_ = torch.max((1-one_hot_y) * outputs-1e4*one_hot_y, dim=1)
-
+    
             loss = -torch.sum(F.relu(correct_logit-wrong_logit+50))
-
+    
             grads = torch.autograd.grad(loss, adv_imgs, grad_outputs=None, 
                     only_inputs=True)[0]
-
+    
             adv_imgs.data += 0.00392 * torch.sign(grads.data) 
-
+    
             # the adversaries' pixel value should within max_x and min_x due 
             # to the l_infinity / l2 restriction
-
+    
             adv_imgs = torch.max(torch.min(adv_imgs, x + magnitude), x - magnitude)
-
+    
             adv_imgs.clamp_(0, 1)
-
+    
             adv_imgs = torch.max(torch.min(adv_imgs, max_x), min_x)
-
+    
     adv_imgs.clamp_(0, 1)
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
     
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -421,7 +422,7 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
     x = x if len(x.shape) == 4 else x.unsqueeze(0)
     y = y if len(y.shape) == 1 else y.unsqueeze(0)
     # print(x.shape)
-
+    
     if previous_p is not None:
         previous_p = previous_p.to(device)
         previous_p_c = previous_p.clone()
@@ -432,11 +433,11 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
     else:
         max_x = x + max_eps
         min_x = x - max_eps
-
+    
     one_hot_y = torch.zeros(y.size(0), 10).to(device)
     one_hot_y[torch.arange(y.size(0)), y] = 1
     x.requires_grad = True 
- 
+     
     n_iter_2, n_iter_min, size_decr = max(int(0.22 * max_iters), 1), max(int(0.06 * max_iters), 1), max(int(0.03 * max_iters), 1)
     if _type == 'linf':
         t = 2 * torch.rand(x.shape).to(device).detach() - 1
@@ -448,7 +449,7 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
         if previous_p is not None:
             x_adv = torch.clamp(x - previous_p + (x_adv - x + previous_p) / (((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                 max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
     x_adv = x_adv.clamp(0., 1.)
     x_best = x_adv.clone()
     x_best_adv = x_adv.clone()
@@ -461,7 +462,7 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
         logits = model(x_adv) # 1 forward pass (eot_iter = 1)
         correct_logit = torch.sum(one_hot_y * logits, dim=1)
         wrong_logit,_ = torch.max((1-one_hot_y) * logits-1e4*one_hot_y, dim=1)
-
+    
         loss_indiv = -F.relu(correct_logit-wrong_logit+50)
         loss = loss_indiv.sum()
     grad = torch.autograd.grad(loss, [x_adv])[0].detach()
@@ -470,10 +471,10 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
     acc = logits.detach().max(1)[1] == y
     acc_steps[0] = acc + 0
     loss_best = loss_indiv.detach().clone()
-
+    
     step_size = magnitude * torch.ones([x.shape[0], 1, 1, 1]).to(device).detach() * torch.Tensor([2.0]).to(device).detach().reshape([1, 1, 1, 1])
     x_adv_old = x_adv.clone()
-
+    
     k = n_iter_2 + 0
     u = np.arange(x.shape[0])
     counter3 = 0
@@ -481,7 +482,7 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
     loss_best_last_check = loss_best.clone()
     reduced_last_check = np.zeros(loss_best.shape) == np.zeros(loss_best.shape)
     n_reduced = 0
-
+    
     for i in range(max_iters):
         with torch.no_grad():
             x_adv = x_adv.detach()
@@ -500,20 +501,20 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
                 x_adv_1 = x_adv + (x_adv_1 - x_adv)
                 x_adv_1 = torch.clamp(x + (x_adv_1 - x) / (((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                     magnitude * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
                 if previous_p is not None:
                     x_adv_1 = torch.clamp(x - previous_p + (x_adv_1 - x + previous_p) / (((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                         max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
             x_adv = x_adv_1 + 0.
         
         x_adv.requires_grad_()
-
+    
         with torch.enable_grad():
             logits = model(x_adv) # 1 forward pass (eot_iter = 1)
             correct_logit = torch.sum(one_hot_y * logits, dim=1)
             wrong_logit,_ = torch.max((1-one_hot_y) * logits-1e4*one_hot_y, dim=1)
-
+    
             loss_indiv = -F.relu(correct_logit-wrong_logit+50)
             loss = loss_indiv.sum()
         
@@ -523,7 +524,7 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
         acc = torch.min(acc, pred)
         acc_steps[i + 1] = acc + 0
         x_best_adv[(pred == 0).nonzero().squeeze()] = x_adv[(pred == 0).nonzero().squeeze()] + 0.
-
+    
         ### check step size
         with torch.no_grad():
             y1 = loss_indiv.detach().clone()
@@ -561,13 +562,13 @@ def CWLinf_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps,
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
     
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -583,7 +584,7 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
     x = x if len(x.shape) == 4 else x.unsqueeze(0)
     y = y if len(y.shape) == 1 else y.unsqueeze(0)
     # print(x.shape)
-
+    
     if previous_p is not None:
         previous_p = previous_p.to(device)
         previous_p_c = previous_p.clone()
@@ -594,9 +595,9 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
     else:
         max_x = x + max_eps
         min_x = x - max_eps
-
+    
     x.requires_grad = True 
- 
+     
     n_iter_2, n_iter_min, size_decr = max(int(0.22 * max_iters), 1), max(int(0.06 * max_iters), 1), max(int(0.03 * max_iters), 1)
     if _type == 'linf':
         t = 2 * torch.rand(x.shape).to(device).detach() - 1
@@ -608,7 +609,7 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
         if previous_p is not None:
             x_adv = torch.clamp(x - previous_p + (x_adv - x + previous_p) / (((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                 max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
     x_adv = x_adv.clamp(0., 1.)
     x_best = x_adv.clone()
     x_best_adv = x_adv.clone()
@@ -630,10 +631,10 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
     acc = logits.detach().max(1)[1] == y
     acc_steps[0] = acc + 0
     loss_best = loss_indiv.detach().clone()
-
+    
     step_size = magnitude * torch.ones([x.shape[0], 1, 1, 1]).to(device).detach() * torch.Tensor([2.0]).to(device).detach().reshape([1, 1, 1, 1])
     x_adv_old = x_adv.clone()
-
+    
     k = n_iter_2 + 0
     u = np.arange(x.shape[0])
     counter3 = 0
@@ -641,7 +642,7 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
     loss_best_last_check = loss_best.clone()
     reduced_last_check = np.zeros(loss_best.shape) == np.zeros(loss_best.shape)
     n_reduced = 0
-
+    
     for i in range(max_iters):
         with torch.no_grad():
             x_adv = x_adv.detach()
@@ -660,15 +661,15 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
                 x_adv_1 = x_adv + (x_adv_1 - x_adv)
                 x_adv_1 = torch.clamp(x + (x_adv_1 - x) / (((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                     magnitude * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
                 if previous_p is not None:
                     x_adv_1 = torch.clamp(x - previous_p + (x_adv_1 - x + previous_p) / (((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                         max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
             x_adv = x_adv_1 + 0.
         
         x_adv.requires_grad_()
-
+    
         with torch.enable_grad():
             logits = model(x_adv) # 1 forward pass (eot_iter = 1)
             if target is not None:
@@ -683,7 +684,7 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
         acc = torch.min(acc, pred)
         acc_steps[i + 1] = acc + 0
         x_best_adv[(pred == 0).nonzero().squeeze()] = x_adv[(pred == 0).nonzero().squeeze()] + 0.
-
+    
         ### check step size
         with torch.no_grad():
             y1 = loss_indiv.detach().clone()
@@ -721,13 +722,13 @@ def PGD_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, ma
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
     
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -742,7 +743,7 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
     y = y[ind_non_suc]
     x = x if len(x.shape) == 4 else x.unsqueeze(0)
     y = y if len(y.shape) == 1 else y.unsqueeze(0)
-
+    
     if previous_p is not None:
         previous_p = previous_p.to(device)
         previous_p_c = previous_p.clone()
@@ -753,9 +754,9 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
     else:
         max_x = x + max_eps
         min_x = x - max_eps
-
+    
     x.requires_grad = True 
- 
+     
     n_iter_2, n_iter_min, size_decr = max(int(0.22 * max_iters), 1), max(int(0.06 * max_iters), 1), max(int(0.03 * max_iters), 1)
     if _type == 'linf':
         t = 2 * torch.rand(x.shape).to(device).detach() - 1
@@ -764,7 +765,7 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
     elif _type == 'l2':
         t = torch.randn(x.shape).to(device).detach()
         x_adv = x.detach() + magnitude * torch.ones([x.shape[0], 1, 1, 1]).to(device).detach() * t / ((t ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12)
-
+    
         if previous_p is not None:
             x_adv = torch.clamp(x - previous_p + (x_adv - x + previous_p) / (((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                 max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
@@ -790,10 +791,10 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
     acc = logits.detach().max(1)[1] == y
     acc_steps[0] = acc + 0
     loss_best = loss_indiv.detach().clone()
-
+    
     step_size = magnitude * torch.ones([x.shape[0], 1, 1, 1]).to(device).detach() * torch.Tensor([2.0]).to(device).detach().reshape([1, 1, 1, 1])
     x_adv_old = x_adv.clone()
-
+    
     k = n_iter_2 + 0
     u = np.arange(x.shape[0])
     counter3 = 0
@@ -801,7 +802,7 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
     loss_best_last_check = loss_best.clone()
     reduced_last_check = np.zeros(loss_best.shape) == np.zeros(loss_best.shape)
     n_reduced = 0
-
+    
     for i in range(max_iters):
         with torch.no_grad():
             x_adv = x_adv.detach()
@@ -809,8 +810,9 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
             x_adv_old = x_adv.clone()
             
             a = 0.75 if i > 0 else 1.0
-            
-            
+
+
+​            
             if _type == 'linf':
                 x_adv_1 = x_adv + step_size * torch.sign(grad)
                 x_adv_1 = torch.clamp(torch.min(torch.max(x_adv_1, x - magnitude), x + magnitude), 0.0, 1.0)
@@ -824,17 +826,17 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
                 x_adv_1 = x_adv + (x_adv_1 - x_adv)*a + grad2*(1 - a)
                 x_adv_1 = torch.clamp(x + (x_adv_1 - x) / (((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                     magnitude * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
                 if previous_p is not None:
                     x_adv_1 = torch.clamp(x - previous_p + (x_adv_1 - x + previous_p) / (((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                         max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
             x_adv = x_adv_1 + 0.
         
         x_adv.requires_grad_()
-
+    
         # print((x_adv-x + previous_p).abs().max())
-
+    
         with torch.enable_grad():
             logits = model(x_adv) # 1 forward pass (eot_iter = 1)
             if target is not None:
@@ -887,7 +889,7 @@ def MI_Attack_adaptive_stepsize(x, y, model, magnitude, previous_p, max_eps, max
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def ODI_Cos_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
@@ -898,14 +900,14 @@ def ODI_Cos_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, 
         loss = -logit_org + logit_target
         loss = torch.sum(loss)
         return loss
-
+    
     def cos_lr(iteration, max_iteration):
         iteration = iteration % max_iteration
         lr = 0.00031 + (0.031-0.00031) * (1 + math.cos(math.pi * iteration / max_iteration)) / 2
         return lr
-
+    
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -925,28 +927,28 @@ def ODI_Cos_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, 
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     x.requires_grad = True 
     
     randVector_ = torch.FloatTensor(*model(x).shape).uniform_(-1.,1.).to(device)
-
+    
     rand_perturb = torch.FloatTensor(x.shape).uniform_(
                 -magnitude, magnitude)
     if torch.cuda.is_available():
         rand_perturb = rand_perturb.to(device)
     adv_imgs = x + rand_perturb
     adv_imgs.clamp_(0, 1)
-
+    
     # max_iters = int(round(magnitude/0.00784) + 2)
     max_iters = int(max_iters)
-
+    
     for i in range(10 + max_iters):
         with torch.enable_grad():
             if i < 10:
                 loss = (model(adv_imgs) * randVector_).sum()
             else:
                 loss = margin_loss(model(adv_imgs),y)
-
+    
         grads = torch.autograd.grad(loss, adv_imgs, grad_outputs=None, 
                     only_inputs=True)[0]
         if i < 10: 
@@ -955,7 +957,7 @@ def ODI_Cos_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, 
             eta = cos_lr(i-10, max_iters) * grads.data.sign()
         
         adv_imgs = Variable(adv_imgs.data + eta, requires_grad=True)
-
+    
         if previous_p is not None:
             max_x = x - previous_p + max_eps
             min_x = x - previous_p - max_eps
@@ -964,13 +966,13 @@ def ODI_Cos_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, 
             min_x = x - max_eps
         adv_imgs = torch.max(torch.min(adv_imgs, max_x), min_x)
         adv_imgs = Variable(torch.clamp(adv_imgs, 0, 1.0), requires_grad=True)
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def ODI_Cyclical_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
@@ -981,15 +983,15 @@ def ODI_Cyclical_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters
         loss = -logit_org + logit_target
         loss = torch.sum(loss)
         return loss
-
+    
     def cycle_step(iteration, max_iteration):
         cycle = np.floor(1+iteration/(max_iteration/3))
         x = np.abs(iteration/(max_iteration/6) - 2*cycle + 1)
         lr = 0.00031 + (0.031-0.00031)*np.maximum(0, (1-x))
         return lr
-
+    
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -1009,28 +1011,28 @@ def ODI_Cyclical_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     x.requires_grad = True 
     
     randVector_ = torch.FloatTensor(*model(x).shape).uniform_(-1.,1.).to(device)
-
+    
     rand_perturb = torch.FloatTensor(x.shape).uniform_(
                 -magnitude, magnitude)
     if torch.cuda.is_available():
         rand_perturb = rand_perturb.to(device)
     adv_imgs = x + rand_perturb
     adv_imgs.clamp_(0, 1)
-
+    
     # max_iters = int(round(magnitude/0.00784) + 2)
     max_iters = int(max_iters)
-
+    
     for i in range(10 + max_iters):
         with torch.enable_grad():
             if i < 10:
                 loss = (model(adv_imgs) * randVector_).sum()
             else:
                 loss = margin_loss(model(adv_imgs),y)
-
+    
         grads = torch.autograd.grad(loss, adv_imgs, grad_outputs=None, 
                     only_inputs=True)[0]
         if i < 10: 
@@ -1039,7 +1041,7 @@ def ODI_Cyclical_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters
             eta = cycle_step(i-10, max_iters) * grads.data.sign()
         
         adv_imgs = Variable(adv_imgs.data + eta, requires_grad=True)
-
+    
         if previous_p is not None:
             max_x = x - previous_p + max_eps
             min_x = x - previous_p - max_eps
@@ -1048,13 +1050,13 @@ def ODI_Cyclical_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters
             min_x = x - max_eps
         adv_imgs = torch.max(torch.min(adv_imgs, max_x), min_x)
         adv_imgs = Variable(torch.clamp(adv_imgs, 0, 1.0), requires_grad=True)
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 
@@ -1067,9 +1069,9 @@ def ODI_Step_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20,
         loss = -logit_org + logit_target
         loss = torch.sum(loss)
         return loss
-
+    
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -1089,28 +1091,28 @@ def ODI_Step_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20,
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     x.requires_grad = True 
     
     randVector_ = torch.FloatTensor(*model(x).shape).uniform_(-1.,1.).to(device)
-
+    
     rand_perturb = torch.FloatTensor(x.shape).uniform_(
                 -magnitude, magnitude)
     if torch.cuda.is_available():
         rand_perturb = rand_perturb.to(device)
     adv_imgs = x + rand_perturb
     adv_imgs.clamp_(0, 1)
-
+    
     # max_iters = int(round(magnitude/0.00784) + 2)
     max_iters = int(max_iters)
-
+    
     for i in range(10 + max_iters):
         with torch.enable_grad():
             if i < 10:
                 loss = (model(adv_imgs) * randVector_).sum()
             else:
                 loss = margin_loss(model(adv_imgs),y)
-
+    
         grads = torch.autograd.grad(loss, adv_imgs, grad_outputs=None, 
                     only_inputs=True)[0]
         if i < 10: 
@@ -1123,7 +1125,7 @@ def ODI_Step_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20,
             eta = 0.00031 * grads.data.sign()
         
         adv_imgs = Variable(adv_imgs.data + eta, requires_grad=True)
-
+    
         if previous_p is not None:
             max_x = x - previous_p + max_eps
             min_x = x - previous_p - max_eps
@@ -1132,19 +1134,19 @@ def ODI_Step_stepsize(x, y, model, magnitude, previous_p, max_eps, max_iters=20,
             min_x = x - max_eps
         adv_imgs = torch.max(torch.min(adv_imgs, max_x), min_x)
         adv_imgs = Variable(torch.clamp(adv_imgs, 0, 1.0), requires_grad=True)
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
-        
+
 def SpatialAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', limits_factor=[5, 5, 31], granularity=[5, 5, 5], gpu_idx=None):
     
     model.eval()
-
+    
     x = x.cuda()
     y = y.cuda()
     if target is not None:
@@ -1158,23 +1160,23 @@ def SpatialAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, tar
     y = y[ind_non_suc]
     x = x if len(x.shape) == 4 else x.unsqueeze(0)
     y = y if len(y.shape) == 1 else y.unsqueeze(0)
- 
+     
     n = x.size(0)
     limits = [x for x in limits_factor]
-
+    
     grid = product(*list(np.linspace(-l, l, num=g) for l, g in zip(limits, granularity)))
-
+    
     worst_x = x.clone()
     worst_t = torch.zeros([n, 3]).cuda()
     max_xent = -torch.ones(n).cuda() * 1e8
     all_correct = torch.ones(n).cuda().bool()
-
+    
     for tx, ty, r in grid:
         spatial_transform = transforms.Compose([
             SpatialAffine(degrees=r, translate=(tx, ty), resample=PIL.Image.BILINEAR),
             transforms.ToTensor()
     ])    
-
+    
         img_list = []
         for i in range(x.shape[0]):
             x_pil = transforms.ToPILImage()(x[i,:,:,:].cpu())
@@ -1184,17 +1186,17 @@ def SpatialAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, tar
         with torch.no_grad():
             output = model(adv_input)
         # output = self.model(torch.from_numpy(x_nat).to(device)).cpu()
-
+    
         cur_xent = F.cross_entropy(output, y, reduce=False)
         cur_correct = output.max(1)[1]==y
-
+    
         # of maximum xent (or just highest xent if everything else if correct).
         idx = (cur_xent > max_xent) & (cur_correct == all_correct)
         idx = idx | (cur_correct < all_correct)
         max_xent = torch.where(cur_xent>max_xent, cur_xent, max_xent)
         # max_xent = np.maximum(cur_xent, max_xent)
         all_correct = cur_correct & all_correct
-
+    
         idx = idx.unsqueeze(-1) # shape (bsize, 1)
         worst_t = torch.where(idx, torch.from_numpy(np.array([tx, ty, r]).astype(np.float32)).cuda(), worst_t) # shape (bsize, 3)
         idx = idx.unsqueeze(-1)
@@ -1204,7 +1206,7 @@ def SpatialAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, tar
 
     adv[ind_non_suc] = worst_x
     # adv = worst_x
-
+    
     return adv, None
 
 def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, target=None, _type='linf', gpu_idx=None):
@@ -1240,7 +1242,7 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
         else:
             max_x = x + max_eps
             min_x = x - max_eps
-
+    
         n_iter_2, n_iter_min, size_decr = max(int(0.22 * max_iters), 1), max(int(0.06 * max_iters), 1), max(int(0.03 * max_iters), 1)
         if _type == 'linf':
             t = 2 * torch.rand(x.shape).to(device).detach() - 1
@@ -1252,14 +1254,14 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
             if previous_p is not None:
                 x_adv = torch.clamp(x - previous_p + (x_adv - x + previous_p) / (((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                     max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
         x_adv = x_adv.clamp(0., 1.)
         x_best = x_adv.clone()
         x_best_adv = x_adv.clone()
         loss_steps = torch.zeros([max_iters, x.shape[0]])
         loss_best_steps = torch.zeros([max_iters + 1, x.shape[0]])
         acc_steps = torch.zeros_like(loss_best_steps)
-
+    
         output = model(x)
         y_target = output.sort(dim=1)[1][:, -target_class]
         
@@ -1276,7 +1278,7 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
         acc = logits.detach().max(1)[1] == y
         acc_steps[0] = acc + 0
         loss_best = loss_indiv.detach().clone()
-
+    
         step_size = magnitude * torch.ones([x.shape[0], 1, 1, 1]).to(device).detach() * torch.Tensor([2.0]).to(device).detach().reshape([1, 1, 1, 1])
         x_adv_old = x_adv.clone()
         counter = 0
@@ -1287,7 +1289,7 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
         loss_best_last_check = loss_best.clone()
         reduced_last_check = np.zeros(loss_best.shape) == np.zeros(loss_best.shape)
         n_reduced = 0
-
+    
         for i in range(max_iters):
             with torch.no_grad():
                 x_adv = x_adv.detach()
@@ -1295,8 +1297,9 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
                 x_adv_old = x_adv.clone()
                 
                 a = 0.75 if i > 0 else 1.0
-                
-                
+
+
+​                
                 if _type == 'linf':
                     x_adv_1 = x_adv + step_size * torch.sign(grad)
                     x_adv_1 = torch.clamp(torch.min(torch.max(x_adv_1, x - magnitude), x + magnitude), 0.0, 1.0)
@@ -1310,7 +1313,7 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
                     x_adv_1 = x_adv + (x_adv_1 - x_adv)*a + grad2*(1 - a)
                     x_adv_1 = torch.clamp(x + (x_adv_1 - x) / (((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                         magnitude * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
-
+    
                     if previous_p is not None:
                         x_adv_1 = torch.clamp(x - previous_p + (x_adv_1 - x + previous_p) / (((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12) * torch.min(
                             max_eps * torch.ones(x.shape).to(device).detach(), ((x_adv_1 - x + previous_p) ** 2).sum(dim=(1, 2, 3), keepdim=True).sqrt() + 1e-12), 0.0, 1.0)
@@ -1331,7 +1334,7 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
             acc = torch.min(acc, pred)
             acc_steps[i + 1] = acc + 0
             x_best_adv[(pred == 0).nonzero().squeeze()] = x_adv[(pred == 0).nonzero().squeeze()] + 0.
-
+    
             ### check step size
             with torch.no_grad():
               y1 = loss_indiv.detach().clone()
@@ -1362,7 +1365,7 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
                       
                   counter3 = 0
                   k = np.maximum(k - size_decr, n_iter_min)
-
+    
         return acc, x_best_adv
 
 
@@ -1371,20 +1374,20 @@ def MultiTargetedAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=2
         acc_curr, adv_curr = run_once(model, x, y, magnitude, max_iters, _type, target_class, max_eps, previous_p)
         ind_curr = (acc_curr == 0).nonzero().squeeze()
         adv[ind_curr] = adv_curr[ind_curr].clone()
-
+    
     now_p = adv-x
     adv_out[ind_non_suc] = adv
     # print(adv_out==x)
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv_out, previous_p_c
-
+    
     return adv_out, now_p
 
 def MomentumIterativeAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=20, decay_factor=1., target=None, _type='linf', gpu_idx=None):
 
     model.eval()
-
+    
     device = 'cuda:{}'.format(gpu_idx)
     x = x.to(device)
     y = y.to(device)
@@ -1404,40 +1407,40 @@ def MomentumIterativeAttack(x, y, model, magnitude, previous_p, max_eps, max_ite
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     adv_imgs = x
     adv_imgs.requires_grad = True 
     adv_imgs = torch.clamp(adv_imgs, min=0, max=1)
-
+    
     # max_iters = 20
     max_iters = int(max_iters)
     with torch.enable_grad():
         for i in range(max_iters):
             outputs = model(adv_imgs)
-
+    
             if target is not None:
                 loss = -F.cross_entropy(outputs, target)
             else:
                 loss = F.cross_entropy(outputs, y)
-
+    
             grads = torch.autograd.grad(loss, adv_imgs, grad_outputs=None, 
                     only_inputs=True)[0]
-
+    
             grad_norm = grads.data.abs().pow(1).view(adv_imgs.size(0), -1).sum(dim=1).pow(1)
-
+    
             grad_norm = torch.max(grad_norm, torch.ones_like(grad_norm) * 1e-6)
-
+    
             g = (grads.data.transpose(0, -1) * grad_norm).transpose(0, -1).contiguous()
-
+    
             g = decay_factor * g + (grads.data.transpose(0, -1) * grad_norm).transpose(0, -1).contiguous()
-
+    
             adv_imgs.data += 0.00392 * torch.sign(g)
-
+    
             if _type == 'linf':
                 if previous_p is not None:
                     max_x = x - previous_p + max_eps
                     min_x = x - previous_p - max_eps
-
+    
                 else:
                     max_x = x + max_eps
                     min_x = x - max_eps
@@ -1452,7 +1455,7 @@ def MomentumIterativeAttack(x, y, model, magnitude, previous_p, max_eps, max_ite
                 dist *= magnitude
                 dist = dist.view(x.shape)
                 adv_imgs = (x + dist) * mask.float() + x * (1 - mask.float())
-
+    
                 if previous_p is not None:
                     original_image = x - previous_p
                     global_dist = adv_imgs - original_image
@@ -1463,17 +1466,17 @@ def MomentumIterativeAttack(x, y, model, magnitude, previous_p, max_eps, max_ite
                     global_dist *= max_eps
                     global_dist = global_dist.view(x.shape)
                     adv_imgs = (original_image + global_dist) * mask.float() + adv_imgs * (1 - mask.float())
-
+    
             adv_imgs.clamp_(0, 1)
-
+    
     adv_imgs.clamp_(0, 1)
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def GradientSignAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=1, target=None, _type='linf', gpu_idx=None):
@@ -1498,41 +1501,41 @@ def GradientSignAttack(x, y, model, magnitude, previous_p, max_eps, max_iters=1,
         previous_p_c = previous_p.clone()
         previous_p = previous_p[ind_non_suc]
         previous_p = previous_p if len(previous_p.shape) == 4 else previous_p.unsqueeze(0)
-
+    
     adv_imgs = x
     adv_imgs.requires_grad = True 
-
+    
     # in FGSM attack, max_iters must be 1
     assert max_iters == 1
-
+    
     if previous_p is not None:
         max_x = x - previous_p + max_eps
         min_x = x - previous_p - max_eps
-
+    
     else:
         max_x = x + max_eps
         min_x = x - max_eps
-
+    
     outputs = model(adv_imgs)
-
+    
     if target is not None:
         loss = -F.cross_entropy(outputs, target)
     else:
         loss = F.cross_entropy(outputs, y)
-
+    
     loss.backward()
     grad_sign = adv_imgs.grad.sign()
-
+    
     pertubation = magnitude * grad_sign
     adv_imgs = torch.clamp(adv_imgs + pertubation,0,1)
     adv_imgs = torch.max(torch.min(adv_imgs, max_x), min_x)
-
+    
     now_p = adv_imgs-x
     adv[ind_non_suc] = adv_imgs
     if previous_p is not None:
         previous_p_c[ind_non_suc] = previous_p + now_p
         return adv, previous_p_c
-
+    
     return adv, now_p
 
 def attacker_list():  # 16 operations and their ranges

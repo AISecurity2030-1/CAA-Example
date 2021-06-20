@@ -25,7 +25,7 @@ class Permute(nn.Module):
     def __init__(self, permutation = [2,1,0]):
         super().__init__()
         self.permutation = permutation
-
+    
     def forward(self, input):
         
         return input[:, self.permutation]
@@ -43,14 +43,14 @@ class ImageNet(Dataset):
     def __len__(self):
         l = len(self.datas)
         return l
-
+    
     def __getitem__(self, idx):
         filename, label_source = self.datas[idx]
         # filename = os.path.join(self.image_dir, self.labels.at[idx, 'ImageId'])
         in_img_t = Image.open(filename)
         if self.transform is not None:
             in_img_t = self.transform(in_img_t)
-
+    
         return in_img_t, label_source
 
 class GaussianSmoothing(object):
@@ -79,7 +79,7 @@ class SpatialAffine(object):
 
     def __init__(self, degrees, translate=None, scale=None, shear=None, resample=False, fillcolor=0):
         self.degrees = degrees
-
+    
         if translate is not None:
             assert isinstance(translate, (tuple, list)) and len(translate) == 2, \
                 "translate should be a list or tuple and it must be of length 2."
@@ -88,11 +88,12 @@ class SpatialAffine(object):
         self.shear = shear
         self.resample = resample
         self.fillcolor = fillcolor
-
+    
+    
     @staticmethod
     def get_params(degrees, translate, scale_ranges, shears, img_size):
         """Get parameters for affine transformation
-
+    
         Returns:
             sequence: params to be passed to the affine transformation
         """
@@ -103,29 +104,29 @@ class SpatialAffine(object):
             translations = (max_dx, max_dy)
         else:
             translations = (0, 0)
-
+    
         if scale_ranges is not None:
             scale = scale_ranges
         else:
             scale = 1.0
-
+    
         if shears is not None:
             shear = shears
         else:
             shear = 0.0
-
+    
         return angle, translations, scale, shear
-
+    
     def __call__(self, img):
         """
             img (PIL Image): Image to be transformed.
-
+    
         Returns:
             PIL Image: Affine transformed image.
         """
         ret = self.get_params(self.degrees, self.translate, self.scale, self.shear, img.size)
         return TF.affine(img, *ret, resample=self.resample, fillcolor=self.fillcolor)
-
+    
     def __repr__(self):
         s = '{name}(degrees={degrees}'
         if self.translate is not None:

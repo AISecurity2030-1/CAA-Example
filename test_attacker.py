@@ -31,7 +31,7 @@ class NormalizeByChannelMeanStd(nn.Module):#标准化
 
     def forward(self, tensor):
         return normalize_fn(tensor, self.mean, self.std)
-
+    
     def extra_repr(self):
         return 'mean={}, std={}'.format(self.mean, self.std)
 
@@ -44,7 +44,6 @@ def normalize_fn(tensor, mean, std):
 
 def predict_from_logits(logits, dim=1):
     return logits.max(dim=dim, keepdim=False)[1]#troch.max()[1]， 只返回每行最大值的每个索引,如tensor([0, 2])
-
 
 parser = argparse.ArgumentParser(description='Random search of Auto-attack')
 
@@ -61,8 +60,8 @@ parser.add_argument('--sub_net_type', default='madry_adv_resnet50', help='resnet
 parser.add_argument('--target', action='store_true', default=False)
 parser.add_argument('--norm', default='linf', help='linf | l2 | unrestricted')
 
-
 args = parser.parse_args()
+
 print(args)
 
 # Linf attack policy searched by CAA
@@ -118,17 +117,17 @@ if args.dataset == 'cifar10':
         from cifar_models.wideresnet import WideResNet
         model = WideResNet()
         model.load_state_dict(torch.load('./checkpoints/model-wideres-epoch76.pt'))
-
+    
     elif args.net_type == 'unlabel':
         from cifar_models.wideresnet import WideResNet
         model = WideResNet(depth=28, num_classes=10, widen_factor=10)
         model.load_state_dict({k[7:]:v for k,v in torch.load('./checkpoints/rst_adv.pt.ckpt')['state_dict'].items()})
-
+    
     elif args.net_type == 'overfitting':
         from cifar_models.wideresnet_nosub import WideResNet
         model = WideResNet(depth=34, num_classes=10, widen_factor=10, dropRate=0.0)
         model.load_state_dict({k[7:]:v for k,v in torch.load('./checkpoints/cifar10_wide10_linf_eps8.pth').items()})
-
+    
     elif args.net_type == 'madry_adv_resnet50':
         from cifar_models.resnet import resnet50
         model = resnet50()
@@ -138,7 +137,7 @@ if args.dataset == 'cifar10':
             mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
         #可以通过nn.Sequential(normalize, model)将图像规范化添加到现有的pytorch模型中，这样就不必再对输入图像进行规范化了。
         model = nn.Sequential(normalize, model)
-
+    
     elif args.net_type == 'madry_adv_resnet50_l2':
         from cifar_models.resnet import resnet50
         model = resnet50()
@@ -146,7 +145,7 @@ if args.dataset == 'cifar10':
         normalize = NormalizeByChannelMeanStd(
             mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
         model = nn.Sequential(normalize, model)
-
+    
     elif args.net_type == 'madry_adv_vgg16':
         from cifar_models.vgg import vgg16
         model = vgg16()
@@ -154,16 +153,16 @@ if args.dataset == 'cifar10':
         normalize = NormalizeByChannelMeanStd(
             mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
         model = nn.Sequential(normalize, model)
-
+    
     elif args.net_type == 'adv_pt':
         from cifar_models.wideresnet_pt import WideResNet
-
+    
         model = WideResNet(28, 10, 10, 0.0)
         model.load_state_dict({k[7:]:v for k,v in torch.load('./checkpoints/cifar10wrn_baseline_epoch_4.pt').items()})
         normalize = NormalizeByChannelMeanStd(
             mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         model = nn.Sequential(normalize, model)
-
+    
     elif args.net_type == 'jem':
         from cifar_models.jem import CCF, DummyModel, model_attack_wrapper
         f = CCF(28, 10, None)
@@ -174,10 +173,10 @@ if args.dataset == 'cifar10':
         else:
             # loading from an old checkpoint
             f.load_state_dict(ckpt_dict)
-
+    
         f = DummyModel(f)
         model = model_attack_wrapper(f)
-
+    
     elif args.net_type == 'madry_adv_inception':
         from cifar_models.inception import inceptionv3
         model = inceptionv3()
@@ -186,7 +185,7 @@ if args.dataset == 'cifar10':
             mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
         model = nn.Sequential(normalize, model).to(device)
         model.eval()
-
+    
     elif args.net_type == 'madry_adv_densenet':
         from cifar_models.densenet import densenet121
         model = densenet121()
@@ -226,7 +225,7 @@ if args.dataset == 'imagenet':
         normalize = NormalizeByChannelMeanStd(
             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         model = nn.Sequential(normalize, model)
-
+    
     elif args.net_type == 'adv_resnet50_linf4':
         from imagenet_models.resnet_madry import resnet50
         model = resnet50()
@@ -234,7 +233,7 @@ if args.dataset == 'imagenet':
         normalize = NormalizeByChannelMeanStd(
             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         model = nn.Sequential(normalize, model)
-
+    
     else:
         raise Exception('The net_type of {} is not supported by now!'.format(args.net_type))
 
@@ -276,7 +275,7 @@ if args.transfer_test:
             mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
         sub_model = nn.Sequential(normalize, sub_model).to(device)
         sub_model.eval()
-
+    
     elif args.sub_net_type == 'madry_adv_densenet':
         from cifar_models.densenet import densenet121
         sub_model = densenet121()
@@ -338,12 +337,12 @@ for _ in range(args.num_restarts):
             target_label = target_label[pred_right]
         else:
             target_label = None
-
+    
         acc_total[bstart:bend] = acc_total[bstart:bend] * (pred==test_labels).cpu().numpy()
-
+    
         test_images = test_images[pred_right]
         test_labels = test_labels[pred_right]
-
+    
         if len(test_images.shape) == 3:
             test_images = test_images.unsqueeze(0)
             test_labels = test_labels.unsqueeze(0)
@@ -351,14 +350,14 @@ for _ in range(args.num_restarts):
             clean_acc_num += 1
         else:
             clean_acc_num += test_labels.size(0)
-
+    
         # test_images = adversary.run_standard_evaluation(test_images, test_labels, bs=args.batch_size)
         # adv = test_images.clone()
-
+    
         subpolicy_out_dict = {}
         #攻击过程应该是，我们拿着数据集中的测试集的每个数据，依次判断，如果数据被模型判断错误，则继续循环判断，否则对该样本应用
         #攻击算法(我们这里就是attack_ops中的apply_attacker.py)，再放入模型判断，如果仍判断正确，则correct+1，最后的准确率就是拿correct的值除以总的测试集大小。
-
+    
         previous_p = None
         for idx, attacker in enumerate(subpolicy):
             attack_name = attacker['attacker']
@@ -373,11 +372,11 @@ for _ in range(args.num_restarts):
                 else:
                     #使用攻击之后的样本去放到模型进行预测，将仍预测正确的位置标为1，并替换之前直接拿测试集对模型进行预测的结果
                     acc_total[bstart:bend][pred_right.cpu().numpy()] = acc_total[bstart:bend][pred_right.cpu().numpy()] * (pred==test_labels).cpu().numpy()
-
+    
             else:
                 ori_adv_images, _ = apply_attacker(test_images, attack_name, test_labels, model, attack_eps, None, int(attack_steps), args.max_epsilon, _type=args.norm, gpu_idx=0, target=target_label)
                 adv_adv_images, p = apply_attacker(subpolicy_out_dict[idx-1], attack_name, test_labels, model, attack_eps, previous_p, int(attack_steps), args.max_epsilon, _type=args.norm, gpu_idx=0, target=target_label)
-
+    
                 pred = predict_from_logits(model(ori_adv_images.detach()))
                 if args.target:
                     acc_total[bstart:bend][pred_right.cpu().numpy()] = acc_total[bstart:bend][pred_right.cpu().numpy()] * (pred!=target_label).cpu().numpy()
@@ -388,7 +387,7 @@ for _ in range(args.num_restarts):
                     acc_total[bstart:bend][pred_right.cpu().numpy()] = acc_total[bstart:bend][pred_right.cpu().numpy()] * (pred!=target_label).cpu().numpy()
                 else:
                     acc_total[bstart:bend][pred_right.cpu().numpy()] = acc_total[bstart:bend][pred_right.cpu().numpy()] * (pred==test_labels).cpu().numpy()
-
+    
                 subpolicy_out_dict[idx] = adv_adv_images.detach()
 
 
@@ -400,7 +399,7 @@ for _ in range(args.num_restarts):
                 previous_p = p
             # print(p.abs().max())
             # print(torch.norm(p.view(p.shape[0], -1), dim=1))
-
+    
             # pred = predict_from_logits(model(adv_images.detach()))
             # ind_suc = (pred!=test_labels).nonzero().squeeze()
             # adv[ind_suc] = test_images[ind_suc]
@@ -415,7 +414,7 @@ for _ in range(args.num_restarts):
         #     image = np.transpose(save_images[i,:,:,:].cpu().numpy(),(1,2,0))*255
         #     image = image.astype('uint8')
         #     imageio.imwrite(os.path.join(save_path, str(total_num-i)+'.png'), image)
-
+    
             # if args.transfer_test:
             #     if args.ensemble:
             #         pred = predict_from_logits(sub_model(adv_images.detach()))
@@ -424,7 +423,7 @@ for _ in range(args.num_restarts):
             #     if args.ensemble:
             #         pred = predict_from_logits(model(adv_images.detach()))
             #         acc_total[bstart:bend][pred_right.cpu().numpy()] = acc_total[bstart:bend][pred_right.cpu().numpy()] * (pred==test_labels).cpu().numpy()
-
+    
         # if args.transfer_test:
         #     if not args.ensemble:
         #         pred = predict_from_logits(sub_model(test_images))
@@ -433,7 +432,7 @@ for _ in range(args.num_restarts):
         #     if not args.ensemble:
         #         pred = predict_from_logits(model(test_images))
         #         acc_total[bstart:bend][pred_right.cpu().numpy()] = acc_total[bstart:bend][pred_right.cpu().numpy()] * (pred==test_labels).cpu().numpy()
-
+    
         # for i in range(test_images.shape[0]):
         #     if pred[i] != test_labels[i,]:
         #         attack_successful_num += 1
