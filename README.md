@@ -62,7 +62,7 @@ CAA 还支持没有任何组合的单一攻击者：当您给出类似 的列表
 * 根据上面的运行说明进行参数设置
 * 示例在windows环境下运行的（建议在linux中运行），根据个人计算机的显卡性能及内存大小设置batch_size的数值（这里设置的值为16，所以运行时间会长一些）
 
-![](C:\Users\lwd\Pictures\Camera Roll\demo.png)
+![C:\Users\lwd\Pictures\Camera Roll\demo.png](C:\Users\lwd\Pictures\Camera Roll\demo.png)
 
 ### 2.6 攻击算法池
 
